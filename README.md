@@ -10,4 +10,4 @@ The main purpose of this readme page is to document updates made to the primate 
 
 ## June 2024 Updates
 
-*Initial published version of the table is added to github
+* Initial published version of the table is added to github
