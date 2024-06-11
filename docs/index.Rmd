@@ -5,8 +5,7 @@ date: "06/11/2024"
 output: html_document
 ---
 
-
-<p>Previous Versions</p>
+The following page displays the most up-to-date results from Rosenbaum, Grebe, and Silk (2024), which are generated from the most recent version of the dataset (see [here](https://github.com/nicholasgrebe/living-paternity-table/tree/main) to see the readme file outlining periodic updates to the underlying dataset). Previous versions of the results are linked here:
 
 <p>* <a href="june_2024/index.html">June 2024</a></p>
 
