@@ -1,0 +1,97 @@
+---
+title: "Results"
+author: "Nicholas Grebe"
+date: "06/11/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+options(scipen = 999, digits = 2) #set to two decimal 
+```
+
+```{r echo=FALSE}
+if (!require("pacman")) install.packages("pacman")
+p_unlock()
+
+pacman::p_load(metafor, ggdist, ggplot2, SkewCalc, marginaleffects, glmmTMB, phyr, evolvability, DHARMa.helpers, tidytree, haven, brms, Rcpp, rstan, ape, ggeffects, emmeans, patchwork, ggsci, purrr, cowplot, collapse, lubridate, DHARMa, dplyr, lme4, lmerTest, ggplot2, glmmTMB, lubridate, tidyr, janitor, data.table, stringr, effects, sjPlot, multcomp, readxl, readr, tibble)
+
+setwd("C:/Users/nicho/Dropbox (University of Michigan)/For Adrian")
+
+phylo_10k <- ape::read.nexus("consensusTree_10kTrees_Primates_Version3.nex")
+
+paternity_table <- read_dta("Paternity table 4.15.2024.dta") %>%
+  mutate(proportion_egp_minimum = n_egp / n_paternities) %>%
+  mutate(proportion_primary_minimum = n_alphaprimary / n_paternities) %>% 
+  rowwise() %>%
+  mutate(n_egp_maximum = sum(n_egp, n_egp_ambiguous, na.rm = TRUE)) %>% #counts NAs as 0s
+  mutate(n_primary_maximum = 
+           case_when(!is.na(n_alphaprimary) & is.na(n_residents_unknownrank) ~ sum(n_alphaprimary, n_residents_unknownrank, na.rm = TRUE),
+                     !is.na(n_alphaprimary) & !is.na(n_residents_unknownrank) ~ sum(n_alphaprimary, n_residents_unknownrank, na.rm = TRUE),
+                     TRUE ~ NA)) %>% #  NAs for alpha always return NAs, regardless if resident is valid or NA
+  mutate(proportion_primary_maximum = n_primary_maximum / n_paternities) %>%
+  mutate(proportion_egp_maximum = n_egp_maximum / n_paternities) %>%
+  mutate(grp_composition = as_factor(grp_composition)) %>%
+  mutate(phylo = as_factor(genus_species_subspecies)) %>%
+  mutate(spp = as_factor(genus_species_subspecies)) %>%
+  filter(!is.na(js_or_sr)) %>% # getting rid of T. leucocephalus (no longer in as of April 2024)
+  mutate(proportion_egp_minimum_no_1s = replace(proportion_egp_minimum, proportion_egp_minimum == 1, .99)) %>%
+  mutate(proportion_primary_minimum_no_1s = replace(proportion_primary_minimum, proportion_primary_minimum == 1, .99)) %>%
+  mutate(proportion_primary_minimum_no_0s = replace(proportion_primary_minimum, proportion_primary_minimum == 0, .01)) %>%
+  mutate(proportion_primary_maximum_no_0s = replace(proportion_primary_maximum, proportion_primary_maximum == 0, .01)) %>%
+  mutate(proportion_resident_loose = #first, the loosest count--assumes all NAs are 0s
+           sum(n_residents_knownrank, n_residents_unknownrank, na.rm = TRUE) / n_paternities) %>% 
+  mutate(proportion_resident_moderate = #moderate--if one or the other is NA, treat as 0; if both NA, return NA
+           case_when(!is.na(n_residents_knownrank) | !is.na(n_residents_unknownrank) ~ sum(n_residents_knownrank, n_residents_unknownrank, na.rm = TRUE) / n_paternities,
+                     !is.na(n_residents_knownrank) & !is.na(n_residents_unknownrank) ~ sum(n_residents_knownrank, n_residents_unknownrank, na.rm = TRUE) / n_paternities,
+                     TRUE ~ NA)) %>%
+  mutate(proportion_resident_strict = #strictest--any NAs returns an NA
+           sum(n_residents_knownrank, n_residents_unknownrank, na.rm = FALSE) / n_paternities)
+
+paternity_table <- paternity_table %>%
+  mutate(proportion_egp_minimum_bounded = (proportion_egp_minimum*(nrow(subset(paternity_table, proportion_egp_minimum != "NA"))-1) + .5)/ nrow(subset(paternity_table, proportion_egp_minimum != "NA"))) %>% #see https://stats.stackexchange.com/questions/31300/dealing-with-0-1-values-in-a-beta-regression for ref
+  relocate(n_alphaprimary, n_primary_maximum, proportion_primary_minimum, proportion_primary_maximum, exclude_entry, phylo, spp, dispersal_pattern:proportion_resident_strict, grp_composition, proportion_egp_minimum, proportion_egp_minimum_no_1s, proportion_egp_minimum_bounded, proportion_primary_minimum, proportion_primary_minimum_no_1s)
+
+paternity_table_valid <- paternity_table %>%
+  filter(exclude_entry == "")
+
+paternity_multimale <- paternity_table_valid %>%
+  filter(grp_composition == "MMF" | grp_composition == "MMFF")
+
+paternity_single_male <- paternity_table_valid %>%
+  filter(grp_composition == "MF" | grp_composition == "MFF")
+
+covar_matrix <- ape::vcv.phylo(phylo_10k)
+```
+
+## Question 1: To what degree does phylogeny predict paternities obtained by alpha/primary males?
+
+```{r echo=FALSE, cache=TRUE}
+model_q1_multimale_minimum <- brm(
+  bf(proportion_primary_minimum ~ (1|gr(phylo, cov = covar_matrix)) + (1|spp),
+     zoi ~ (1|gr(phylo, cov = covar_matrix)) + (1|spp)),
+  data = paternity_multimale,
+  cores = 12,
+  family = zero_one_inflated_beta(),
+  data2 = list(covar_matrix = covar_matrix),
+  control = list(adapt_delta = 0.95), #slows down model but suggested 
+  prior = c(
+    prior(normal(0, 1), "Intercept"),
+    prior(student_t(3, 0, 2.5), "sd"),
+    prior(student_t(3, 0, 2.5), "phi")
+  )
+)
+```
+
+```{r echo=FALSE, eval=FALSE}
+summary(model_q1_multimale_minimum)
+pp_check(model_q1_multimale_minimum)
+simres <- dh_check_brms(model_q1_multimale_minimum, integer = FALSE)
+```
+
+```{r echo=FALSE}
+hyp <- paste("(sd_phylo__Intercept^2 + sd_phylo__zoi_Intercept^2) /", "(sd_phylo__Intercept^2 + sd_phylo__zoi_Intercept^2 + phi^2 + sd_spp__Intercept^2 + sd_spp__zoi_Intercept^2) = 0")
+hyp <- hypothesis(model_q1_multimale_minimum, hyp, class = NULL)
+```
+
+The estimated phylogenetic signal for the proportion of paternities obtained by primary males in multimale groups is essentially zero (Pagel's Lambda: `r hyp$hypothesis$Estimate`; 95% CI: `r hyp$hypothesis$CI.Lower`, `r hyp$hypothesis$CI.Upper`).

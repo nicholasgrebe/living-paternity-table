@@ -5,6 +5,13 @@ date: "06/11/2024"
 output: html_document
 ---
 
+
+<p>Previous Versions</p>
+
+<p>* <a href="june_2024/index.html">June 2024</a></p>
+
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
 options(scipen = 999, digits = 2) #set to two decimal 
